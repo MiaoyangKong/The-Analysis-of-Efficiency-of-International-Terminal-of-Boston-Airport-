@@ -1,0 +1,321 @@
+---
+title: "The Analysis of Efficiency of International Terminal of Boston Airport"
+output: html_document
+---
+
+Project Final Report
+
+Group: 1
+
+Names: Yongjia Tu; Xiwei Cao; Mingyu Si; Miaoyang Kong
+
+```{r setup, echo = FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning = FALSE,fig.height = 3)
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(XML)
+source("../../scripts/viridis.R")
+source("../../scripts/ggprob.R")
+```
+
+```{r, echo = FALSE}
+bos16 = read_csv("../../Finaldata/BOS-2016.csv")
+bos17 = read_csv("../../Finaldata/BOS-2017.csv")
+bos18 = read_csv("../../Finaldata/BOS-2018.csv")
+bos19 = read_csv("../../Finaldata/BOS-2019.csv")
+bos20 = read_csv("../../Finaldata/BOS-2020.csv")
+bos20 = bos20%>%
+  drop_na()%>%
+  mutate(`U.S. Citizen` = as.double(`U.S. Citizen`),
+         `...6` = as.double(`...6`),
+         `Non U.S. Citizen` = as.double(`Non U.S. Citizen`),
+         ...8 = as.double(...8),
+         ...10 = as.double(...10))
+bos_total = bind_rows(bos16, bos17, bos18,bos19,bos20)
+Sys.setlocale("LC_TIME", "English")
+bos_total = bos_total %>%
+  drop_na()%>%
+  mutate(Date = mdy(Date),
+         year = year(Date),
+         month = month(Date, label = TRUE),
+         day = day(Date),
+         wday = wday(Date, label = TRUE)) %>%
+  select(Date, year, month, day, wday, everything()) %>%
+  select(-Terminal)%>%
+  rename(us_avg_wait = `U.S. Citizen`,
+         us_max_wait = `...6`,
+         non_us_avg_wait = `Non U.S. Citizen`,
+         non_us_max_wait = ...8,
+         all_avg_wait = `All`,
+         all_max_wait = `...10`,
+         all_n_0_15 = `...11`,
+         all_n_16_30 = `...12`,
+         all_n_31_45 = `...13`,
+         all_n_46_60 = `...14`,
+         all_n_61_90 = `...15`,
+         all_n_91_120 = `...16`,
+         all_n_120_plus = `...17`,
+         all_excluded = `...18`,
+         passengers = `...19`,
+         flights = `...20`,
+         booths = `...21`)%>%
+  mutate(all_avg_wait = as.double(all_avg_wait))%>%        
+  arrange(Date,Hour)
+rm(bos16, bos17, bos18,bos19,bos20)
+```
+## Introduction
+
+We are interested in the wait time at Boston airport due to our own experience of traveling to the U.S. as international students. We are concerned about traveling to the U.S. due to COVID-19. Therefore, we wish to analyze the average passenger arrival during weeks in the past few years to avoid the peak weekdays while selecting our plane tickets.
+We are interested in the situation at Boston airport because one of us used to travel to Boston during the winter break and it is interesting for us to explore the wait time between the US and non-US passport holders, which corresponds to the international students and the local students. Because of our feelings as international students during the journey to the US. We obtained 2016-2020 data for Boston Airport from United States Customs and Border Protection. In this report, we have discovered that at Boston Airport, the average wait time for US passport holders is shorter than that for non-US passport holders and the average waiting time will fluctuate through different time periods, and COVID-19 has caused a steep decline in passenger arrivals at Boston Airport.
+
+
+Here are the questions we are interested in:
+
+1. What is the difference in wait time of US citizens and non-US citizens at Boston airport for each year from 2016 to 2020?
+
+2. What is the difference between the monthly meantime of US and non-US passengers' average waiting time for each year?
+
+3. What is the impact of COVID-19 on the number of people at Boston Airport in 2020?
+
+4. What is the relationship between different times in each season of the year and the booth rate?
+
+5. The passenger arrival varies throughout the week. What is the peak of passenger arrival of each week within a month?
+
+TS: Due to some out feelings during the journey and the travel plan, we are focused on questions like the waiting time difference between US passport holders and non-US passport holders, the efficiency of booths, and the average passenger arrivals during different times, especially the impact of COVID-19.
+
+
+## Background
+
+The data of wait time at Boston Airport was collected by the United States Customs and Border Protection.
+The airport wait times record at the busiest International airports around the U.S. is archived by CBP and is available for download at their [website](https://awt.cbp.gov/). The airport wait times record shown on the website can date back to July 1, 2008, and continue through the present. CBP measures the time required for passengers to pass through the passport control area and shares this information with the public. The recorded time does not include the time to disembark the plane, walk to the passport control area or pick up luggage, pass through the security check and navigate the airport to the transfer boarding gate. 
+We have collected data on the wait time of Boston airport Terminal E from January 1, 2016, through December 31, 2020, to analyze the difference in wait time of the US and non-US passport holders. The data collected is based on all passengers who arrive at Boston airport in the indicated time interval and it is based on a large population.
+
+
+There are only 11 days in the collected data without recorded airport wait times in the range from January 1, 2016, through December 31, 2020, which is quite remarkable.
+
+```{r, echo = FALSE}
+bind = bos_total %>%
+  select(Date) %>%
+  mutate(Date = ymd(Date))
+seq = tibble(Date = seq(ymd("2016-01-01"),ymd("2020-06-30"),1))
+missing = distinct(anti_join( seq, bind, by = "Date"))
+nrow(missing)
+```
+
+We have extracted key variables from the bos_total data set, in which the passenger wait times are recorded by day, month, and year at Boston airport from 2016 to 2020. Measurements of average and maximum wait time for US citizens, non-US citizens, and all passengers are recorded.
+The key variables we extracted include the average wait time and the maximum wait time for US and non-US citizens and the variables are all measured in minutes. 
+
+```{r, echo = FALSE}
+library(kableExtra)
+
+bos_wait_times_variables = tibble(
+  Name = c("us_avg_wait", "us_max_wait", "non_us_avg_wait", "non_us_max_wait"),
+  Description = c("Average wait time for US citizens (minute)",
+                  "Maximum wait time for US citizens (minute)",
+                  "Average wait time for non US citizens (minute)",
+                  "Maximum wait time for non US citizens (minute)"))
+
+bos_wait_times_variables %>% 
+  kable(caption = "Key Variables from the Airport Wait Times of Boston international Airport Data") %>% 
+  kable_styling(position = "left", full_width = FALSE,
+                bootstrap_options = c("striped"))
+
+```
+The following is the first ten rows of our selected data:
+
+```{r}
+bos_total %>%
+  head(10)
+```
+
+
+
+### One Graph
+
+At the beginning, we are concerned about the difference in wait time of the US and non-US passport holders.
+The following graph shows the difference in wait time of US citizens and non-US citizens at Boston airport for each year from 2016 to 2020.
+```{r, echo = FALSE}
+bos_total %>%
+  ggplot(aes(x = us_avg_wait, y = non_us_avg_wait,alpha = 0.3))+
+  geom_point()+
+  geom_smooth(se = FALSE, method = "lm")+
+  facet_wrap(~year)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Average waiting time of US passport holders")+
+  ylab("Average waiting time of non-US passport holders")+
+  ggtitle("The average waiting time comparison between US and Non-US passport holders")+
+  theme(legend.position = "none")
+```
+
+The blue line represents that the trend of the real waiting time relationship between US passport holders and non-US passport holders. The black line represents that both US passport holders and non-US passport holders have the same average waiting time. Most of the points shown in the graph are located above the black line which has a zero intercept and a slope of one and the blue curve shows a trend of the data of each year. The graph indicates that the ratio of non-US passenger wait time to US passenger wait time is greater than one for most of the cases.
+
+It is concluded by the graph that the average time to get through the passport control area is greater for non-US passport holders than US passport holders.
+
+### 2
+Then, after we have examined the difference in average wait time between US and non-US passengers, we aim to zoom in to examine the question at a monthly scale throughout the years.
+The following graph illustrates the difference between the monthly meantime of us and non us passengers' average waiting time for each year.
+```{r, echo = FALSE}
+bos_difference = bos_total %>%
+  group_by(year, month) %>%
+  summarize(mean_us_avg_wait = mean(us_avg_wait),
+            mean_non_us_avg_wait = mean(non_us_avg_wait))
+
+bos_difference %>%
+  ggplot(aes(x = year))+
+  geom_line(aes(y = mean_us_avg_wait), color = "blue")+
+  geom_line(aes(y = mean_non_us_avg_wait), color = "red")+
+  facet_wrap(~month) +
+  xlab("Year")+
+  ylab("Mean of Average Waiting Time")+
+  ggtitle(" Monthly Mean of Average Waiting Time for each year",
+          subtitle = "Blue=US citizen, Red=Non US citizen")+
+  theme(axis.text.x = element_text(angle = 15))
+```
+
+From the graphs, they show that the meantime of average waiting time for both US citizens and non-US citizens for each month decreased in 2020 because of the COVID-19. We use dplyr package to create 'year' and 'month' groups and compute a table of the monthly average time of average wait time for US citizens and non-US citizens during 2016-2020. Also, we use ggplot package to make line plots with different facets by month, which have line color associated with avg/max that visualizes the difference between the monthly average wait time for US citizens and non-US citizens in our data.
+
+
+
+### 3
+In the third part, after examining the wait time, we would like to explore the efficiency of Booths which could actually influence the wait time.
+The following graph displays the relationship between different times in each season of the year and the booth rate.
+
+In this question, we aim to deal with the data with the following procedures:
+-Add a column named booth_rate to the data set which estimates the average number of passengers per booth per hour.
+
+-Add another column called time_of_day which takes the value “overnight” from 1 am to 5 am, “early morning” from 5 am to 8 am, “morning” from 8 am to noon, “afternoon” from noon to 5 pm, and “early evening” from 5 pm to 8 pm, and “late evening” from 8 pm to 1 am.
+
+-Filter out cases where there are fewer than 200 total passengers, the average wait time is zero, or the booth rate is over 500. (avoid outliers)
+```{r, echo = FALSE}
+bos_q3 = bos_total%>%
+  mutate(season = case_when(
+           month == "Mar" ~ "Spring",
+           month == "Apr" ~ "Spring",
+           month == "May" ~ "Spring",
+           month == "Jun" ~ "Summer",
+           month == "Jul" ~ "Summer",
+           month == "Aug" ~ "Summer",
+           month == "Sep" ~ "Fall",
+           month == "Oct" ~ "Fall",
+           month == "Nov" ~ "Fall",
+           month == "Dec" ~ "Winter",
+           month == "Jan" ~ "Winter",
+           month == "Feb" ~ "Winter",
+           TRUE ~ "other"
+         ))%>%
+  mutate(first_hour = str_sub(Hour,1,4)) %>%
+  mutate(booth_rate = (passengers * 60) / (booths * all_avg_wait),
+         time_of_day = case_when(
+           first_hour == "0000" ~ "late evening",
+    first_hour < "0500" ~ "overnight",
+    first_hour < "0800" ~ "early morning",
+    first_hour < "1200" ~ "morning",
+    first_hour < "1700" ~ "afternoon",
+    first_hour < "2000" ~ "early evening",
+    TRUE ~ "late evening"))%>%
+  mutate(bos_q3 = case_when(
+        time_of_day == "overnight" ~ 0, 
+        time_of_day == "early morning" ~ 1, 
+        time_of_day == "morning" ~ 2, 
+        time_of_day == "afternoon" ~ 3,
+        time_of_day == "early evening" ~ 4, 
+        time_of_day == "late evening" ~ 5)) %>%
+    mutate(time_of_day = reorder(time_of_day, bos_q3))
+bos_q3%>%
+  filter(passengers >= 200, all_avg_wait != 0, booth_rate <= 500)%>%
+  ggplot(aes(x = season, y = booth_rate, color = season))+
+  geom_boxplot() +
+  facet_wrap(~time_of_day)+
+  xlab("Different time in each season of the year") +
+  ylab("Booth Rate")+
+  ggtitle("Booth rate in different time in each season of the year")
+
+```
+
+Although the data of overnight is too small to draw conclusions, we can still observe from the other figures that the booth rate of early evening is the highest in all seasons, and the average booth rate of early morning is the lowest.
+```{r, echo = FALSE}
+bos444 = bos_q3%>%
+  select(booth_rate, time_of_day, passengers, all_avg_wait)%>%
+  filter(time_of_day != "overnight")%>%
+  filter(passengers >= 200, all_avg_wait != 0, booth_rate <= 500)%>%
+  group_by(time_of_day)%>%
+  summarise(n = n(),
+            avg = sum(booth_rate) / n,
+            booth_rate_sd = sd(booth_rate))
+bos444
+```
+Then, we use the above data to do a z test to test whether the booth rate in the early evening is larger than that at any else time. The z scores between early evening and any one of others time of day except overnight show that early evening is actually larger than that at else time.
+
+### 4
+
+In the fourth part, we find that the monthly trend of average wait time decreases sharply in the year 2020 by observing the previous graph. We think the cause is COVID-19 and speculate that the pandemic will also have the same impact on passenger arrivals at the airport. I used the 2020 data because I think this year’s data can better reflect people’s responses to emergencies and subsequent attitudes.
+
+The following graph shows the impact of COVID-19 on the number of people at Boston Airport in 2020.
+```{r, echo = FALSE}
+bos20 = bos_total%>%
+  filter(year == 2020)%>%
+  select(Date, passengers)%>%
+  group_by(Date)%>%
+  summarise(total_passengers = sum(passengers))
+bos20%>%
+  ggplot(aes(x = Date, y = total_passengers)) +
+  geom_point()+
+  geom_smooth(se = FALSE)+
+  ylab("Total passengers")+
+  ggtitle("The relationship between total passengers and COVID-19")
+
+```
+
+It is very obvious that when the epidemic began at the beginning of the year, the number of passengers at the airport dropped sharply. The outbreak of the epidemic in March led to a cliff-like decline in the number of passengers at Boston Airport. Around June, the number of people dropped to their lowest point and began to slowly rise until September. From September to the end of the year, the number of passengers at the airport has always been much lower than the average number of previous years. In general, the arrival of the epidemic has reduced the airport to almost no passengers. After the recovery, it has always maintained about 1/10 of the pre-epidemic.
+
+### 5
+In the last part, we explore the peak of passenger arrival of each week within a month which we could combine with the previous conclusion to make our own travel plan due to the passenger arrival varies throughout the week. 
+The following graph shows the peak of passenger arrival of each week within a month.
+
+```{r, echo = FALSE}
+avg_5 = bos_total%>%
+  group_by(month, wday)%>%
+  summarise(passengers = sum(passengers) / n())
+avg_5 %>% 
+  ggplot(aes(x = wday, y = passengers, fill = wday))+
+  geom_col()+
+  facet_wrap(~month) +
+  scale_x_discrete(label = NULL)+
+  xlab("each day of the week over 2016-2020")+
+  ylab("The average number of passengers") +
+  ggtitle("The average number of passengers per day of the week over 2016-2020")+
+  guides(fill = guide_legend(title="Weekday"))
+
+```
+
+We can conclude from the graph that Sunday and Saturday are the peaks of passenger arrivals throughout the year. Tuesday is the day in the week that has the least amount of passengers in general.
+
+
+### Discussion：
+
+The average time to get through the passport control area is greater for non-US passport holders than US passport holders from 2016 to 2020. Also, the average waiting time will fluctuate through different time periods. Through analysis, we find that no matter what season, the efficiency of the booth in the early evening is the highest and Tuesday is the day of the week that has the least amount of passengers in general.
+
+Moreover, the passenger arrivals decline steeply at Boston Airport because of COVID-19. Through analysis, it can be concluded that the meantime of the average waiting time for both US citizens and non-US citizens for each month decreased in 2020 and the epidemic has caused airport passengers to fall off a cliff, and the end of 2020 is about 1/10 of the beginning of the year. 
+
+# Potential short-comings and possible future research directions：
+The data is provided by US official agencies. Although there are certain measurement errors, it is generally credible. However, many of the data are not recorded, which leads to deviations in the analysis results. For example, in question 3, there are too many overnight data omissions, which makes it impossible to draw valid conclusions. Our key assumption is that past data can predict the future. But the fact is that the arrival of the epidemic makes this hypothesis no longer valid and whether the conclusion is reliable remains to be further verified.
+
+In the future, we would like to consider more variables including temperature, weather, holidays, etc., which could have an impact on the waiting time and the number of passengers.
+
+### Reference：
+The airport wait times record at the busiest International airports around the U.S. is archived by CBP and is available for download at their [website](https://awt.cbp.gov/)^[https://awt.cbp.gov/]. The airport wait times record shown on the website can date back to July 1, 2008, and continue through the present. 
+
+We have collected data on the wait time of Boston airport Terminal E from 1/1/2016 to 12/31/2020.
+
+The following data are uploaded together with this assignment as supplement files:
+Airport Wait Times BOS-2016
+Airport Wait Times BOS-2017
+Airport Wait Times BOS-2018
+Airport Wait Times BOS-2019
+Airport Wait Times BOS-2020
+BOS-2016
+BOS-2017
+BOS-2018
+BOS-2019
+BOS-2020
